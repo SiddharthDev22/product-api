@@ -3,7 +3,7 @@ WORKDIR /app
 COPY --chown=gradle:gradle . .
 RUN gradle buildFatJar --no-daemon
 
-FROM eclipse-temurin:17-jre-alpine
+FROM amazoncorretto:17-alpine
 WORKDIR /app
 COPY --from=build /app/build/libs/product-api.jar app.jar
 EXPOSE 8080
