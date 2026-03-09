@@ -45,11 +45,10 @@ class ProductRepository {
      */
     suspend fun applyDiscount(productId: String, discountId: String, percent: Double): Product =
         newSuspendedTransaction {
-            // Validate product exists and lock the row to prevent concurrent modifications
             val product = ProductsTable
                 .selectAll()
                 .where { ProductsTable.id eq productId }
-                .forUpdate()  // SELECT FOR UPDATE — row-level lock
+                .forUpdate()
                 .singleOrNull()
                 ?: throw NoSuchElementException("Product not found: $productId")
 
@@ -57,26 +56,25 @@ class ProductRepository {
                 "Discount percent must be between 0 (exclusive) and 100 (exclusive), got: $percent"
             }
 
-            // Attempt insert; unique constraint (product_id, discount_id) prevents duplicates.
-            // ExposedSQLException with SQLState 23505 = unique_violation in PostgreSQL.
-            try {
+            val alreadyExists = DiscountsTable
+                .selectAll()
+                .where {
+                    (DiscountsTable.productId eq productId) and
+                            (DiscountsTable.discountId eq discountId)
+                }
+                .count() > 0
+
+            if (!alreadyExists) {
                 DiscountsTable.insert {
                     it[DiscountsTable.productId] = productId
                     it[DiscountsTable.discountId] = discountId
                     it[DiscountsTable.percent] = percent
                 }
                 logger.info("Applied discount '$discountId' ($percent%) to product '$productId'")
-            } catch (e: ExposedSQLException) {
-                val sqlState = e.cause?.let { (it as? SQLException)?.sqlState }
-                    ?: (e.cause?.cause as? SQLException)?.sqlState
-                if (sqlState == "23505") {
-                    logger.info("Discount '$discountId' already applied to product '$productId' — skipping (idempotent)")
-                } else {
-                    throw e
-                }
+            } else {
+                logger.info("Discount '$discountId' already applied to '$productId' — skipping (idempotent)")
             }
 
-            // Re-fetch discounts after (potential) insert
             val discounts = DiscountsTable
                 .selectAll()
                 .where { DiscountsTable.productId eq productId }
